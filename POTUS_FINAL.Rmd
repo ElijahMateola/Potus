@@ -1,0 +1,353 @@
+---
+title: "Twitter Mining"
+author: "Elijah Mateola"
+output: 
+  html_notebook:
+    toc: true
+    toc_float: true
+    theme: yeti
+    highlight: haddock
+---
+
+## 1. Introduction
+The goal in this project is to extract and analyze twitter data (tweets) that is related to our current president, Donald J. Trump. In this exercise we will extract the data and perform a sentiment analysis to determine if the majority of the tweets are positive (users have nice things to say about Trump.) or negative (user do not have kind things to say),identify, and count the most frequent positive and negative sentiments along with analyzing the most frequent words terrms in general used within 5000 of the most recent tweets! Lastly, we will visualize all results.
+  
+
+### 1.1 Install and Load Packages
+```{r eval=FALSE}
+require(tidyverse)
+require(tm)
+require(twitteR)
+require(plotly)
+require(SnowballC)
+require(wordcloud)
+require(qdap)
+require(stringr)
+```
+
+     
+
+## 2. Twitter Access
+The first step to extacting tweets is to acquire access to twitter. 
+
+##### We can do this by: 
+  + [creating an application](https://apps.twitter.com/) on twitter.  
+  + Click on create new app, you will be asked fill in a name, description, website url and a callback url. 
+  + Once these are filled in, check the "I have read the [Twitter Developement Agreement](https://dev.twitter.com/overview/terms/agreement-and-policy) box". 
+  + Lastly, aquire your twitter api and access tokens. 
+  + Assign them accordingly in R and execute authorization. The below approach uses the twitter api and access token to execute the extraction of data.
+```{r eval=FALSE}
+api_key <-"xZV5jTVFvxi77qpQPMfMXtv16"
+api_secret <-"ZVzUC4NBfwiwEfjvWNn4WIjZGn0KHxtPrugbEXDH7plluZ77RX"
+Access_token <-"2172617703-ZMdMlSTwVSw3vBFxSkqr0ZTk1U8nH7beLJ8bQ1l"
+Access_token_secret <-"B5aLvyK0hCwAo3Ddqr1mthGXP24LoDm9jeKHw5vjRqZdT"
+
+setup_twitter_oauth(api_key,api_secret,Access_token,Access_token_secret)
+```
+## 3. Sentiment: The Positive and Negative 
+Find a source, whether it be a website or a txt document, containing positive and negative words and save the different types of words into a txt document that can be easily accessed. Next, set your working directiory to where you saved your files and extract the data and make sure each word is appropriately assigned.
+
+
+```{r eval=FALSE}
+setwd("D:/RCode/Sentiment")
+positive=scan('positive-words.txt',what='character',comment.char=';')
+positive[20:35]
+```
+```{r eval=FALSE}
+setwd("D:/RCode/Sentiment")
+negative=scan('negative-words.txt',what='character',comment.char=';')
+negative[500:510]
+```
+Next remove the word cloud from the list of negative words the positive words just to show that is there are words in the list that don't belong, the can be placed in the other list.
+```{r}
+positive=c(positive,"cloud")
+negative=negative[negative!="cloud"]
+```
+## 4. Twitter Extract
+Now that we have our adjusted list, we can finally extract the tweets from twitter using a twitter search string with variables findfd (topic of tweets) and number(# of tweets). Find the tweets that pertain to what you're searching for. In this case, it will be about Donald Trump.
+```{r}
+findfd= "donaldtrump"
+number= 10000
+```
+Then we search twitter for tweets pertaing to the subject. We can also disregard retweets as an option.
+```{r}
+tweet=searchTwitter(findfd,number, retryOnRateLimit = 1000)
+tweetn= strip_retweets(tweet)
+```
+We can now extact the tweets using the gettext() function and we can show the first ten tweets.
+```{r}
+tweetT=lapply(tweetn,function(t)t$getText())
+head(tweetT, 10)
+```
+## 5. Cleaning the Data
+* Once we have the tweets, we must clean them.
+  + In this case we clean the data by:
+      + Making all letters lower case.
+      + Removing Punctuation
+      + Removing Numbers
+      + Removing URLs
+      + Removing Special Characters 
+      + Removing Stopwords
+      + Removing Spaces
+      + Removing Tabs
+  
+But first, lets prevent errors on the lower case function tolower() by writting an error catching function.
+```{r}
+tryTolower = function(x){
+  y = NA
+try_error = tryCatch(tolower(x), error = function(e) e)
+if (!inherits(try_error, "error"))
+    y = tolower(x)
+}
+```
+
+Now let's clean up using the gsub() function. As you see towards the end we found a way to make all the letters lower-case. Then we will unlist the words we come up with and split the strings so that it is no longer a list but a character vector.
+```{r}
+clean<-function(t){
+ t<- gsub('[[:punct:]]','',t)
+ t<- gsub("&amp", "",t)
+ t<- gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "",t)
+ t<- gsub("\\b[[:alnum:]]{20,}\\b", " ",t, perl=T)
+ t<- gsub('[[:cntrl:]]','',t) 
+ t<- gsub('\\d+','',t)
+ t<- gsub('[[:digit:]]','',t)
+ t<- gsub('@\\w+','',t)
+ t<- gsub('http\\w+','',t)
+ t<- gsub("^\\s+|\\s+$", "", t)
+ t<- gsub("[ \t]{2,}", "",t)
+ t<- gsub("<.*>", " ",t)
+ t<- gsub("\\+", "plus", t)
+ t<- gsub("\\$", "dollars", t)
+ t<- sapply(t,function(x) tryTolower(x))
+ t<- str_split(t," ")
+ t<- unlist(t)
+ return(t)
+}
+```
+Now we can analyze the vector of words within the 5000 tweets and use the clean() function and store the information by giving them a name like "tweetclean".
+```{r}
+tweetclean<-lapply(tweetT,function(x) clean(x))
+head(tweetclean,5)
+```
+## 6. Sentiment: Matching Dictionaries
+Now that we have our individual words from our twiter feeds, we can compare and match these words with the words from our positive and negative lists and define a function to count the matches.
+```{r}
+returnpscore=function(tweet) {
+    pos.match=match(tweet,positive)
+    pos.match=!is.na(pos.match)
+    pos.score=sum(pos.match)
+    return(pos.score)
+}
+returnpscore=function(tweet) {
+    neg.match=match(tweet,negative)
+    neg.match=!is.na(neg.match)
+    neg.score=sum(neg.match)
+    return(neg.score)
+}
+```
+Next we find out how many frequent positive and negative words there are in all of the tweets combined by applying the previous function to the vector, tweetclean and defining a loop.
+```{r}
+positive.score=lapply(tweetclean,function(x) returnpscore(x))
+pcount=0
+for (i in 1:length(positive.score)) {
+  pcount=pcount+positive.score[[i]]
+}
+pcount
+```
+
+```{r}
+negative.score=lapply(tweetclean,function(x) returnpscore(x))
+ncount=0
+for(i in 1:length(negative.score)) {
+  ncount=ncount+negative.score[[i]]
+}
+ncount
+```
+## 7. Sentiment: Results and Visualization
+Next we assign the positive and negative words with the apropriate match functions for visualization.
+```{r}
+poswords=function(tweets){
+    pmatch=match(t,positive)
+    posw=positive[pmatch]
+    posw=posw[!is.na(posw)]
+    return(posw)
+  }
+```
+
+```{r}
+negwords=function(tweets){
+    nmatch=match(t,negative)
+    negw=negative[nmatch]
+    negw=negw[!is.na(negw)]
+    return(negw)
+  }
+```
+Then we retrive the positive and negative matches and create data frames and character vectors.
+```{r}
+words=NULL
+pdatamart=data.frame(words)
+
+for (t in tweetclean) {
+  pdatamart=c(poswords(t),pdatamart)
+}
+head(pdatamart,10)
+pwords<-unlist(pdatamart)
+```
+
+```{r}
+words=NULL
+ndatamart=data.frame(words)
+
+for (t in tweetclean) {
+  ndatamart=c(negwords(t),ndatamart)
+}
+head(ndatamart,10)
+nwords<-unlist(ndatamart)
+```
+Variables "dpwords" and "dnwords" are converted to dataframe objects to show frequent words 
+```{r}
+dpwords=data.frame(table(pwords))
+dnwords=data.frame(table(nwords))
+```
+We use dplyr to create character variables and filter to only look for words that repeat at least 15 times.
+```{r}
+dpwords=dpwords%>%
+  mutate(pwords=as.character(pwords))%>%
+  filter(Freq>15)
+```
+
+```{r}
+dnwords=dnwords%>%
+  mutate(nwords=as.character(nwords))%>%
+  filter(Freq>15)
+```
+Finally we graph our results using the ggplot package analyzing the top positive/negative words and the amount of repetition within 5000 tweets along with the total for positive/negative words:
+```{r}
+ggplot(dpwords,aes(pwords,Freq))+
+  geom_bar(stat="identity",fill="lightblue")+
+  theme_bw()+
+  geom_text(aes(pwords,Freq,label=Freq),size=4)+
+  labs(x="Major Positive Words", 
+       y="Frequency of Occurence",
+       title=paste("Major Positive Words and Occurence in \n '",
+                   findfd,
+                   "' Twitter Feeds, n =",number))+
+  geom_text(aes(1,5,label=paste("Total Positive Words :",pcount)),size=4,hjust=-2, vjust=-3)+theme(axis.text.x=element_text(angle=45))+
+  coord_flip()
+
+```
+
+```{r}
+ggplot(dnwords,aes(nwords,Freq))+
+  geom_bar(stat="identity",fill="lightblue")+theme_bw()+
+  geom_text(aes(nwords,Freq,label=Freq),size=4)+
+  labs(x="Major Negative Words", y="Frequency of Occurence",title=paste("Major Negative Words and Occurence in \n '",findfd,"' Twitter Feeds, n =",number))+
+  geom_text(aes(1,5,label=paste("Total Negative Words :",ncount)),size=4,hjust=-1, vjust=-3)+theme(axis.text.x=element_text(angle=45))+
+  coord_flip()
+```
+Then we finally analyze the sentiment positive and negative words and determine whether it's overall positive or negative.
+```{r}
+score= pcount- ncount
+score
+```
+## 8. Frequent Words Overall
+After finding the sentiment, we can take a look at the most common words in general within the 5000 tweets we extracted.
+
+### 8.1 WordCloud
+
+Next we create a corpus (a collection of text documents) using the "VectorSource()" function to eliminate unnecessary words and clean it using the tm package to create a WordCloud.
+```{r}
+tweetscorpus=Corpus(VectorSource(tweetclean))
+tweetscorpus=tm_map(tweetscorpus,removeWords,stopwords("english"))
+tweetscorpus <- tm_map(tweetscorpus, content_transformer(removePunctuation))
+tweetscorpus <- tm_map(tweetscorpus, content_transformer(removeNumbers))
+tweetscorpus <- tm_map(tweetscorpus, content_transformer(stripWhitespace))
+Clean_Potus <- tm_map(tweetscorpus, content_transformer(tolower))
+removeURL <- function(x) gsub("http[[:alnum:][:punct:]]*", "", x) 
+tweetscorpus <- tm_map(tweetscorpus, content_transformer (removeURL))
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+tweetscorpus <- tm_map(tweetscorpus, removeWords, "@\\w+")
+tweetscorpus <- tm_map(tweetscorpus, removeWords, "y\\w+")
+tweetscorpus <- tm_map(tweetscorpus, removeWords, "a\\w+")
+tweetscorpus<- tm_map(tweetscorpus, removeWords, c("donaldtrump","trump","donald","realdonaldtrump","crealdonaldtrump","cdonald","ctrump", "cdonaldtrump", "just", "will", "like"))
+tweetscorpus <- tm_map(tweetscorpus, toSpace, "/")
+tweetscorpus <- tm_map(tweetscorpus, toSpace, "@")
+tweetscorpus <- tm_map(tweetscorpus, toSpace, "\\|")
+stopwords("english")[30:50]
+```
+Now that we have cleaned the corpus, we can then use the wordcloud package to create visual clarity of the most commonly used word with 5000 tweet pertaining Donald Trump.
+```{r}
+set.seed(1234)
+wordcloud(tweetscorpus,scale=c(3,0.5),random.order = FALSE,rot.per = 0.20,use.r.layout = FALSE,colors = brewer.pal(8,"Dark2"),max.words = 350)
+         
+```
+### 8.2 The Matrix
+
+To really visualize these common words we can transform the corpus into a matrix using the function "DocumentTermMatrix" and remove sparse or low frequency words. 
+```{r}
+dtm=DocumentTermMatrix(tweetscorpus)
+dtms=removeSparseTerms(dtm,.99)
+freq=sort(colSums(as.matrix(dtm)),decreasing=TRUE)
+findFreqTerms(dtm,lowfreq=50)
+```
+### 8.3 Visual Analysis
+Lastly, convert the document matrix into a data frame and then to a graph containing words with a minimum frequency of 200.
+```{r}
+wf=data.frame(word=names(freq),freq=freq)
+wfh=wf%>%
+  filter(freq>=50,!word==tolower(findfd))
+```
+In this graph we evaluate the most common words and the amount of times they had been repeated along with a reminder of how many frequent positive words there were compared to negeatve words.
+```{r}
+ggplot(wfh,aes(word,freq)) +
+  geom_bar(stat="identity",fill='lightblue') +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45,hjust=1)) +
+  geom_text(aes(word,freq,label=freq),size=4) +
+  labs(x="High Frequency Words ",
+       y="Number of Occurences", 
+       title=paste("High Frequency Words and Occurence in \n '",
+                   findfd,
+                   "' Twitter Feeds,
+                   n =",number)) +
+  geom_text(aes(1,max(freq)-100,
+                label=paste("# Positive Words:",
+                            pcount,
+                            "\n",
+                            "# Negative Words:",
+                            ncount,"\n")),size=4, hjust=-1, vjust=-2.5)
+
+```
+
+## 9. Conclusion
+In conclusion, the overall sentiment is neutral but consider that these codes do not analyze sarcasm, a comedic tool used to discredit someone. I theorize that this is the only reason our results were positive. My solution to finding sarcastic tweets would be to conduct a seperate sentiment within sarcastic tweets to pinpoint what is truley ment to be negative and what is meant to be positive.
+
+
+    
+### 9.1 Tools Used and Required:
+* ####Sites:
+     + [rstudio](https://www.rstudio.com/)
+     + [CRAN](https://cran.r-project.org/)
+
+Packages Needed                | Function(s)
+------------------------------ |----------------------------------------------------
+twitteR                        | used to exact and analyze twitter data
+dplyr                          | to create data frames
+tm                             | this is a text mining tool used to evaluate twitter text                           |
+ggplot                         | a visualization tool used to create graphs and charts                         |
+stringr                        | helps with vectors
+wordcloud                      | to evaluate frequent words visually
+SnowballC                      | word steming tool to aid in match positive and negative words                 |
+qdap                           | helps with frequency counts
+
+
+### 9.2 References
+* Links:
+      + <http://rmarkdown.rstudio.com/html_document_format.html#keeping_markdown>
+      + <https://www.rstudio.com/wp-content/uploads/2016/03/rmarkdown-cheatsheet-2.0.pdf>
+      + <https://rpubs.com/abNY2015/90345>
+      + <https://stackoverflow.com/questions/38487502/remove-stop-words-using-tm-package-gsub-error>
+      + <https://www.youtube.com/watch?v=JM_J7ufS-BU&spfreload=1>
+      + <https://www.youtube.com/watch?v=JoArGkOpeU0#t=37.730905>
+      + <https://www.youtube.com/watch?v=lT4Kosc_ers&t=2s>
+      + <http://tidytextmining.com/sentiment.html>  
